@@ -1,0 +1,324 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'detail_tiket.dart';
+
+class TiketSayaPage extends StatefulWidget {
+  final Map<String, dynamic>? tiketBaru;
+  final int idPenumpang;
+
+  const TiketSayaPage({super.key, this.tiketBaru, required this.idPenumpang});
+
+  @override
+  State<TiketSayaPage> createState() => _TiketSayaPageState();
+}
+
+class _TiketSayaPageState extends State<TiketSayaPage> {
+  List<Map<String, dynamic>> daftarTiket = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchTiket();
+  }
+
+  Future<void> fetchTiket() async {
+    if (!mounted) return;
+    setState(() => loading = true);
+    try {
+      final response = await http.get(
+        Uri.parse('https://fifafel.my.id/api/tiket/${widget.idPenumpang}'),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['status'] == true) {
+          List<Map<String, dynamic>> tiketDariApi =
+              List<Map<String, dynamic>>.from(data['data']);
+
+          if (widget.tiketBaru != null) {
+            tiketDariApi.insert(0, widget.tiketBaru!);
+          }
+
+          final now = DateTime.now();
+          tiketDariApi = tiketDariApi.where((t) {
+            String status = t['status'].toString().toLowerCase();
+            if (status == 'berhasil') status = 'aktif';
+            if (status != 'menunggu' && status != 'aktif') return false;
+
+            try {
+              final keberangkatanStr =
+                  '${t['tanggal_keberangkatan']} ${t['jam']}';
+              final keberangkatan = DateTime.parse(keberangkatanStr);
+
+              return now.isBefore(
+                keberangkatan.add(const Duration(minutes: 0)),
+              );
+            } catch (_) {
+              return false;
+            }
+          }).toList();
+
+          if (!mounted) return;
+          setState(() {
+            daftarTiket = tiketDariApi;
+          });
+        } else {
+          if (!mounted) return;
+          setState(() => daftarTiket = []);
+        }
+      } else {
+        if (!mounted) return;
+        setState(() => daftarTiket = []);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => daftarTiket = []);
+      print('Error fetch tiket: $e');
+    } finally {
+      if (!mounted) return;
+      setState(() => loading = false);
+    }
+  }
+
+  String displayStatus(String status) {
+    if (status.toLowerCase() == 'berhasil') return 'Aktif';
+    return status[0].toUpperCase() + status.substring(1);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: AppBar(
+        title: Text(
+          'Tiket Menunggu',
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        backgroundColor: const Color(0xFF960000),
+        elevation: 2,
+        centerTitle: true,
+      ),
+      body: SafeArea(
+        child: loading
+            ? const Center(child: CircularProgressIndicator())
+            : daftarTiket.isEmpty
+            ? Center(
+                child: Text(
+                  'Tidak ada tiket menunggu',
+                  style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: daftarTiket.length,
+                itemBuilder: (context, i) {
+                  final ticket = daftarTiket[i];
+
+                  return GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => DetailTikePage(data: ticket),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black12.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          // Header Tanggal Pemesanan
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFF8F8F8),
+                              borderRadius: BorderRadius.vertical(
+                                top: Radius.circular(18),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.calendar_today_rounded,
+                                  size: 18,
+                                  color: Colors.black87,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Dipesan: ${ticket['tanggal_pemesanan']}',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13.5,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          // Isi Tiket
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Icon bus
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFECEC),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(
+                                    Icons.directions_bus_rounded,
+                                    size: 24,
+                                    color: Color(0xFF960000),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+
+                                // Info utama tiket
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '${ticket['asal']} → ${ticket['tujuan']}',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.black,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        '${ticket['tanggal_keberangkatan']} • ${ticket['jam']}',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 13.5,
+                                          color: Colors.grey[700],
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Nomor Tiket: ${ticket['nomor_tiket']}',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          color: Colors.black54,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.people_alt_rounded,
+                                            size: 16,
+                                            color: Colors.black54,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            '${(ticket['penumpang'] as List).length} Penumpang • Kursi: ${ticket['penumpang'].map((p) => p['kursi']).join(', ')}',
+                                            style: GoogleFonts.inter(
+                                              fontSize: 13,
+                                              color: Colors.black87,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                // Status & harga
+                                // Status & harga
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 5,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color:
+                                            (ticket['status']
+                                                        .toString()
+                                                        .toLowerCase() ==
+                                                    'berhasil' ||
+                                                ticket['status']
+                                                        .toString()
+                                                        .toLowerCase() ==
+                                                    'aktif')
+                                            ? Colors.green
+                                            : Colors.orange,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        displayStatus(ticket['status']),
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 12.5,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      _formatRupiah(ticket['total_bayar']),
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: const Color(0xFF222222),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+      ),
+    );
+  }
+
+  String _formatRupiah(dynamic value) {
+    final n = (value is num)
+        ? value.toInt()
+        : int.tryParse(value.toString().split('.').first) ?? 0;
+    final s = n.toString().replaceAllMapped(
+      RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+      (m) => '${m[1]}.',
+    );
+    return 'Rp $s';
+  }
+}

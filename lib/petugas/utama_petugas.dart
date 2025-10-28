@@ -1,0 +1,585 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:google_fonts/google_fonts.dart';
+
+void main() {
+  runApp(
+    MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        textTheme: GoogleFonts.poppinsTextTheme(),
+        primarySwatch: Colors.red,
+      ),
+      home: const HalamanPetugas(),
+    ),
+  );
+}
+
+class HalamanPetugas extends StatefulWidget {
+  const HalamanPetugas({Key? key}) : super(key: key);
+
+  @override
+  State<HalamanPetugas> createState() => _HalamanPetugasState();
+}
+
+class _HalamanPetugasState extends State<HalamanPetugas> {
+  final String baseUrl = 'https://fifafel.my.id/api/petugas';
+
+  List<Map<String, dynamic>> ruteList = [];
+  List<Map<String, dynamic>> jadwalList = [];
+  List<int> kursiTersedia = [];
+  Map<int, int> noToIdKursi = {}; // mapping no_kursi -> id_kursi
+
+  String? selectedRute;
+  String? selectedJamId;
+  DateTime? selectedDate;
+  Map<int, String> penumpangPerKursi = {};
+  List<int> selectedSeats = [];
+
+  int hargaRute = 0;
+  bool showDenah = false;
+
+  final List<List<dynamic>> seatLayout = [
+    [1, 2, null, 'setir'],
+    [null, 3, 4, 5],
+    [6, null, 7, 8],
+    [9, null, 10, 11],
+    [12, 13, 14, 15],
+  ];
+
+  String get formattedDate {
+    if (selectedDate == null) return 'dd-mm-yyyy';
+    return '${selectedDate!.day.toString().padLeft(2, '0')}-'
+        '${selectedDate!.month.toString().padLeft(2, '0')}-'
+        '${selectedDate!.year}';
+  }
+
+  String get formattedDateForApi {
+    if (selectedDate == null) return '0000-00-00';
+    return '${selectedDate!.year}-'
+        '${selectedDate!.month.toString().padLeft(2, '0')}-'
+        '${selectedDate!.day.toString().padLeft(2, '0')}';
+  }
+
+  bool get isFormValid =>
+      selectedRute != null && selectedDate != null && selectedJamId != null;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchRute();
+  }
+
+  Future<void> fetchRute() async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/rute'));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          ruteList = List<Map<String, dynamic>>.from(data['data']);
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> fetchJam(String ruteId) async {
+    final response = await http.get(Uri.parse('$baseUrl/rute/$ruteId/jadwal'));
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      setState(() {
+        jadwalList = List<Map<String, dynamic>>.from(data['data']);
+      });
+    }
+  }
+
+  Future<void> fetchKursiTersedia(
+    String ruteId,
+    String tanggal,
+    String jamId,
+  ) async {
+    final url =
+        '$baseUrl/kursi/tersedia?rute=$ruteId&tanggal=$tanggal&jam=$jamId';
+    final response = await http.get(Uri.parse(url));
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final kursiData = List<Map<String, dynamic>>.from(data['data']);
+      setState(() {
+        kursiTersedia = kursiData
+            .where((k) => k['status'] == 'kosong')
+            .map<int>((k) => k['no_kursi'] as int)
+            .toList();
+        noToIdKursi = {for (var k in kursiData) k['no_kursi']: k['id_kursi']};
+        selectedSeats = [];
+        penumpangPerKursi.clear();
+      });
+    }
+  }
+
+  Future<void> submitPemesanan() async {
+    final url = Uri.parse('$baseUrl/pesan');
+    final headers = {'Content-Type': 'application/json'};
+
+    final body = json.encode({
+      'id_rute': selectedRute.toString(),
+      'tanggal': formattedDateForApi,
+      'id_jadwal': selectedJamId.toString(),
+      'penumpang': penumpangPerKursi.entries
+          .map((e) => {"kursi": noToIdKursi[e.key], "nama": e.value})
+          .toList(),
+    });
+
+    final response = await http.post(url, headers: headers, body: body);
+    if (response.statusCode == 200) {
+      showDialog(
+        context: context,
+        builder: (_) => const AlertDialog(
+          title: Text("✅ Berhasil"),
+          content: Text("Pemesanan berhasil disimpan!"),
+        ),
+      );
+      setState(() {
+        showDenah = false;
+        selectedSeats = [];
+        penumpangPerKursi.clear();
+      });
+    } else {
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text("❌ Gagal"),
+          content: Text(
+            "Terjadi kesalahan simpan. Status code: ${response.statusCode}\n${response.body}",
+          ),
+        ),
+      );
+    }
+  }
+
+  void toggleKursi(int nomor) {
+    setState(() {
+      if (selectedSeats.contains(nomor)) {
+        selectedSeats.remove(nomor);
+        penumpangPerKursi.remove(nomor);
+      } else {
+        selectedSeats.add(nomor);
+        penumpangPerKursi[nomor] = '';
+      }
+    });
+  }
+
+  Widget kursiBox(dynamic nomor) {
+    if (nomor == null) return const SizedBox(width: 42, height: 42);
+    if (nomor == 'setir') {
+      return const Icon(Icons.directions_bus, size: 32, color: Colors.black45);
+    }
+
+    final isSelected = selectedSeats.contains(nomor);
+    final isAvailable = kursiTersedia.contains(nomor);
+
+    Color warnaKursi;
+    if (!isAvailable) {
+      warnaKursi = Colors.grey;
+    } else if (isSelected) {
+      warnaKursi = Colors.blue;
+    } else {
+      warnaKursi = Colors.green;
+    }
+
+    return GestureDetector(
+      onTap: isAvailable ? () => toggleKursi(nomor) : null,
+      child: Container(
+        alignment: Alignment.center,
+        margin: const EdgeInsets.all(4),
+        width: 50,
+        height: 50,
+        decoration: BoxDecoration(
+          color: warnaKursi,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black12,
+              blurRadius: 4,
+              offset: Offset(2, 2),
+            ),
+          ],
+        ),
+        child: Text(
+          nomor.toString(),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLegend(Color color, String label) {
+    return Row(
+      children: [
+        Container(
+          width: 18,
+          height: 18,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 12)),
+      ],
+    );
+  }
+
+  Widget denahKursi() {
+    return Column(
+      children: [
+        const Text(
+          "🪑 Denah Kursi Bus",
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        ),
+        const SizedBox(height: 12),
+        ...seatLayout.map(
+          (row) => Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: row.map<Widget>((n) => kursiBox(n)).toList(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildLegend(Colors.blue, "Dipilih"),
+            const SizedBox(width: 16),
+            _buildLegend(Colors.green, "Tersedia"),
+            const SizedBox(width: 16),
+            _buildLegend(Colors.grey, "Tidak Tersedia"),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Column(
+          children: selectedSeats.map((kursi) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: TextField(
+                decoration: InputDecoration(
+                  labelText: "Nama penumpang kursi $kursi",
+                  filled: true,
+                  fillColor: Colors.grey[100],
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onChanged: (val) {
+                  setState(() {
+                    penumpangPerKursi[kursi] = val;
+                  });
+                },
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 12),
+        if (selectedSeats.isNotEmpty)
+          Text(
+            "Total Harga: Rp ${selectedSeats.length * hargaRute}",
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+            ),
+          ),
+        const SizedBox(height: 12),
+        if (selectedSeats.isNotEmpty &&
+            penumpangPerKursi.values.every((n) => n.trim().isNotEmpty))
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color.fromARGB(255, 125, 0, 0),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+            ),
+            onPressed: submitPemesanan,
+            child: const Text(
+              'Tambah Pemesanan',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inputDecorationBase = InputDecoration(
+      filled: true,
+      fillColor: Colors.grey[100],
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+    );
+
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color.fromARGB(255, 125, 0, 0),
+        elevation: 4,
+        automaticallyImplyLeading: false,
+        title: Row(
+          children: const [
+            Icon(Icons.admin_panel_settings, color: Colors.white),
+            SizedBox(width: 8),
+            Text(
+              'Kontrol Pemesanan - Petugas',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Card(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              elevation: 6,
+              margin: const EdgeInsets.only(bottom: 16),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: const [
+                        Icon(Icons.route, color: Colors.redAccent),
+                        SizedBox(width: 6),
+                        Text(
+                          "Pilih Rute",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<String>(
+                      hint: const Text('Pilih Rute'),
+                      value: selectedRute,
+                      items: ruteList
+                          .map(
+                            (r) => DropdownMenuItem<String>(
+                              value: r['id_rute'].toString(),
+                              child: Text('${r['asal']} - ${r['tujuan']}'),
+                              onTap: () {
+                                hargaRute = r['harga'] ?? 0;
+                              },
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (val) {
+                        setState(() {
+                          selectedRute = val;
+                          selectedJamId = null;
+                          jadwalList = [];
+                        });
+                        if (val != null) fetchJam(val);
+                      },
+                      decoration: inputDecorationBase,
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: const [
+                        SizedBox(width: 6),
+                        Text(
+                          "Pilih Tanggal",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            readOnly: true,
+                            controller: TextEditingController(
+                              text: formattedDate,
+                            ),
+                            decoration: inputDecorationBase.copyWith(
+                              suffixIcon: const Icon(
+                                Icons.calendar_today,
+                                color: Colors.blue,
+                              ),
+                            ),
+                            onTap: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: selectedDate ?? DateTime.now(),
+                                firstDate: DateTime.now(),
+                                lastDate: DateTime(2030),
+                              );
+                              if (picked != null) {
+                                setState(() => selectedDate = picked);
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() {
+                              selectedDate = DateTime.now();
+                            });
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                          ),
+                          child: const Text(
+                            "Hari Ini",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: const [
+                        Icon(Icons.access_time, color: Colors.orange),
+                        SizedBox(width: 6),
+                        Text(
+                          "Jam Keberangkatan",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<String>(
+                      hint: const Text('Pilih Jam Keberangkatan'),
+                      value: selectedJamId,
+                      items: jadwalList.map((j) {
+                        final jamText = j['jam_keberangkatan'] ?? '-';
+                        DateTime? jamDateTime;
+                        try {
+                          final parts = jamText.split(':');
+                          if (parts.length >= 2) {
+                            jamDateTime = DateTime(
+                              selectedDate?.year ?? DateTime.now().year,
+                              selectedDate?.month ?? DateTime.now().month,
+                              selectedDate?.day ?? DateTime.now().day,
+                              int.parse(parts[0]),
+                              int.parse(parts[1]),
+                            );
+                          }
+                        } catch (_) {}
+                        final now = DateTime.now();
+                        final isDisabled =
+                            jamDateTime != null && jamDateTime.isBefore(now);
+
+                        return DropdownMenuItem<String>(
+                          value: j['id_jadwal'].toString(),
+                          child: Text(
+                            jamDateTime != null
+                                ? "${jamDateTime.hour.toString().padLeft(2, '0')}:${jamDateTime.minute.toString().padLeft(2, '0')}"
+                                : jamText,
+                            style: TextStyle(
+                              color: isDisabled ? Colors.grey : Colors.black,
+                            ),
+                          ),
+                          enabled: !isDisabled,
+                        );
+                      }).toList(),
+                      onChanged: (val) {
+                        setState(() {
+                          selectedJamId = val;
+                        });
+                      },
+                      decoration: inputDecorationBase,
+                    ),
+                    const SizedBox(height: 14),
+                    Center(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color.fromARGB(255, 125, 0, 0),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 36,
+                            vertical: 12,
+                          ),
+                        ),
+                        onPressed: isFormValid
+                            ? () {
+                                fetchKursiTersedia(
+                                  selectedRute!,
+                                  formattedDateForApi,
+                                  selectedJamId!,
+                                );
+                                setState(() {
+                                  showDenah = true;
+                                });
+                              }
+                            : null,
+                        child: const Text(
+                          "Tampilkan Data",
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (showDenah)
+              Card(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                elevation: 6,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: denahKursi(),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
