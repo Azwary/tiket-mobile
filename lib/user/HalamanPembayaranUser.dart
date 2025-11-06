@@ -47,7 +47,6 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
     for (int i = 0; i < widget.kursi.length; i++) {
       final controller = TextEditingController();
 
-      // Penumpang pertama otomatis terisi dari login
       if (i == 0 && widget.namaPenumpang != null) {
         controller.text = widget.namaPenumpang!;
       }
@@ -79,7 +78,6 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- CARD INFORMASI PEMESANAN ---
             Card(
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -117,7 +115,6 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
 
             const SizedBox(height: 24),
 
-            // --- DETAIL PENUMPANG ---
             const Text(
               "Detail Penumpang",
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -209,7 +206,6 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
         ),
       ),
 
-      // --- TOMBOL LANJUT KE PEMBAYARAN ---
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.all(16),
         child: SizedBox(
@@ -235,11 +231,24 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
                 return;
               }
 
-              // 🔒 Lock kursi sementara sebelum lanjut ke konfirmasi
               try {
-                final uri = Uri.parse('https://fifafel.my.id/api/lock-kursi');
+                final unlockUri = Uri.parse(
+                  'https://fifafel.my.id/api/unlock-kursi',
+                );
+                await http.post(
+                  unlockUri,
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                  },
+                  body: jsonEncode({'id_jadwal': widget.idJadwal}),
+                );
+
+                final lockUri = Uri.parse(
+                  'https://fifafel.my.id/api/lock-kursi',
+                );
                 final response = await http.post(
-                  uri,
+                  lockUri,
                   headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
@@ -252,27 +261,23 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
 
                 if (response.statusCode == 200) {
                   final data = jsonDecode(response.body);
-                  print(
-                    "✅ Kursi berhasil dikunci hingga: ${data['locked_until']}",
-                  );
+                  print("✅ Kursi dikunci hingga: ${data['locked_until']}");
                 } else {
-                  print("⚠️ Gagal mengunci kursi: ${response.body}");
+                  print("⚠️ Gagal lock kursi: ${response.body}");
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text("Gagal mengunci kursi, coba lagi."),
-                    ),
+                    const SnackBar(content: Text("Gagal mengunci kursi")),
                   );
                   return;
                 }
               } catch (e) {
-                print("❌ Error lock kursi: $e");
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Terjadi kesalahan koneksi.")),
-                );
+                print("❌ Error: $e");
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text("Koneksi gagal")));
                 return;
               }
 
-              // Buat daftar penumpang untuk dikirim ke halaman konfirmasi
+              // Buat data untuk konfirmasi pembayaran
               final List<Map<String, dynamic>> detailPenumpang = List.generate(
                 widget.kursi.length,
                 (i) => {
@@ -282,7 +287,6 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
                 },
               );
 
-              // Format tanggal ke yyyy-MM-dd
               final parsedTanggal = DateFormat(
                 'dd MMMM yyyy',
                 'id',
@@ -291,7 +295,6 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
                 'yyyy-MM-dd',
               ).format(parsedTanggal);
 
-              // Navigasi ke halaman konfirmasi pembayaran
               Navigator.push(
                 context,
                 MaterialPageRoute(
