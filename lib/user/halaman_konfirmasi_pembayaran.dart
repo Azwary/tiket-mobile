@@ -212,7 +212,27 @@ class _HalamanKonfirmasiPembayaranState
     );
   }
 
-  void _showWaktuHabisDialog() {
+  void _showWaktuHabisDialog() async {
+    try {
+      final idJadwal = widget.detailPenumpang.first['id_jadwal'];
+      final kursiIds = widget.detailPenumpang
+          .map((p) => p['id_kursi'].toString())
+          .toList();
+
+      final uri = Uri.parse('https://fifafel.my.id/api/unlock-kursi');
+      await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({'id_jadwal': idJadwal, 'kursi': kursiIds}),
+      );
+    } catch (e) {
+      print("Gagal unlock kursi otomatis: $e");
+    }
+
+    // tampilkan dialog
     showDialog(
       context: context,
       builder: (_) => AlertDialog(

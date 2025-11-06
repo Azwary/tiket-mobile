@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'halaman_konfirmasi_pembayaran.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'halaman_konfirmasi_pembayaran.dart';
 
 class HalamanPembayaranUser extends StatefulWidget {
   final String dari;
@@ -40,7 +42,7 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
   @override
   void initState() {
     super.initState();
-    initializeDateFormatting('id', null); // inisialisasi locale Indonesia
+    initializeDateFormatting('id', null);
 
     for (int i = 0; i < widget.kursi.length; i++) {
       final controller = TextEditingController();
@@ -207,6 +209,7 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
         ),
       ),
 
+      // --- TOMBOL LANJUT KE PEMBAYARAN ---
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.all(16),
         child: SizedBox(
@@ -218,7 +221,7 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            onPressed: () {
+            onPressed: () async {
               List<String> namaPenumpangList = namaControllers
                   .map((c) => c.text.trim())
                   .toList();
@@ -232,16 +235,54 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
                 return;
               }
 
+              // 🔒 Lock kursi sementara sebelum lanjut ke konfirmasi
+              try {
+                final uri = Uri.parse('https://fifafel.my.id/api/lock-kursi');
+                final response = await http.post(
+                  uri,
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                  },
+                  body: jsonEncode({
+                    'id_jadwal': widget.idJadwal,
+                    'kursi': widget.kursi,
+                  }),
+                );
+
+                if (response.statusCode == 200) {
+                  final data = jsonDecode(response.body);
+                  print(
+                    "✅ Kursi berhasil dikunci hingga: ${data['locked_until']}",
+                  );
+                } else {
+                  print("⚠️ Gagal mengunci kursi: ${response.body}");
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Gagal mengunci kursi, coba lagi."),
+                    ),
+                  );
+                  return;
+                }
+              } catch (e) {
+                print("❌ Error lock kursi: $e");
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Terjadi kesalahan koneksi.")),
+                );
+                return;
+              }
+
+              // Buat daftar penumpang untuk dikirim ke halaman konfirmasi
               final List<Map<String, dynamic>> detailPenumpang = List.generate(
                 widget.kursi.length,
                 (i) => {
-                  "id_jadwal": widget.idJadwal, // 🔥 Tambahkan ini
-                  "id_kursi": widget.kursi[i], // ubah key jadi id_kursi
+                  "id_jadwal": widget.idJadwal,
+                  "id_kursi": widget.kursi[i],
                   "nama": namaPenumpangList[i],
                 },
               );
 
-              // Pastikan tanggal diformat ke yyyy-MM-dd
+              // Format tanggal ke yyyy-MM-dd
               final parsedTanggal = DateFormat(
                 'dd MMMM yyyy',
                 'id',
@@ -250,13 +291,14 @@ class _HalamanPembayaranUserState extends State<HalamanPembayaranUser> {
                 'yyyy-MM-dd',
               ).format(parsedTanggal);
 
+              // Navigasi ke halaman konfirmasi pembayaran
               Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (context) => HalamanKonfirmasiPembayaran(
                     dari: widget.dari,
                     ke: widget.ke,
-                    tanggal: formattedTanggal, // ✅ sudah format aman
+                    tanggal: formattedTanggal,
                     jamKeberangkatan: widget.jamKeberangkatan,
                     totalBayar: totalBayar,
                     detailPenumpang: detailPenumpang,
