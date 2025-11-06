@@ -232,9 +232,10 @@ class _HalamanKonfirmasiPembayaranState
       print("Gagal unlock kursi otomatis: $e");
     }
 
-    // tampilkan dialog
+    // tampilkan dialog waktu habis
     showDialog(
       context: context,
+      barrierDismissible: false, // agar tidak bisa ditutup tanpa menekan tombol
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         content: Column(
@@ -257,7 +258,12 @@ class _HalamanKonfirmasiPembayaranState
             ),
             const SizedBox(height: 18),
             ElevatedButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                Navigator.of(context).pop(); // tutup dialog
+                Navigator.of(context).popUntil((route) => route.isFirst);
+                // kembali ke halaman utama
+                HalamanUtamaUser.globalKey.currentState?.setTabIndex(0);
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF960000),
                 shape: RoundedRectangleBorder(
@@ -265,7 +271,7 @@ class _HalamanKonfirmasiPembayaranState
                 ),
               ),
               child: const Text(
-                "Kembali",
+                "Kembali ke Beranda",
                 style: TextStyle(color: Colors.white),
               ),
             ),
@@ -273,6 +279,14 @@ class _HalamanKonfirmasiPembayaranState
         ),
       ),
     );
+
+    // otomatis kembali setelah 5 detik tanpa perlu tekan tombol
+    Future.delayed(const Duration(seconds: 5), () {
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+        HalamanUtamaUser.globalKey.currentState?.setTabIndex(0);
+      }
+    });
   }
 
   @override
